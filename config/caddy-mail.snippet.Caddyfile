@@ -1,19 +1,24 @@
 # ---------------------------------------------------------------------------
-# Bloco a ADICIONAR ao /opt/proxy/Caddyfile para emitir o certificado
-# Let's Encrypt de mail.marujo.dev. O Caddy ja e dono das portas 80/443,
-# entao ele e quem obtem e renova o certificado; o container de e-mail apenas
-# le os arquivos gerados (montagem read-only em /caddy-certs).
+# Blocos adicionados ao /opt/proxy/Caddyfile (secao "MAIL").
 #
-# Depois de adicionar, recarregue o Caddy SEM downtime:
-#   docker exec -w /etc/caddy caddy caddy reload
+#   mail.marujo.dev     -> so existe para o Caddy emitir/renovar o certificado
+#                          Let's Encrypt que o Postfix/Dovecot usam
+#                          (o container mail le em /caddy-certs/, ro).
+#   webmail.marujo.dev  -> Roundcube (container 'roundcube', rede 'proxy').
 #
-# Em seguida, no /opt/mail/.env troque:
-#   SSL_TYPE=self-signed   ->   SSL_TYPE=manual
-# e rode:  cd /opt/mail && docker compose up -d
+# O Caddyfile e um bind-mount de arquivo unico; editores que reescrevem o
+# arquivo trocam o inode e o `caddy reload` NAO pega a mudanca. Use:
+#   docker restart caddy          (~1s de indisponibilidade no proxy)
+#
+# STATUS: aplicado em 2026-08-27. .env em SSL_TYPE=manual, certs LE ativos
+# para mail.marujo.dev e webmail.marujo.dev.
 # ---------------------------------------------------------------------------
 
 mail.marujo.dev {
-	# Nao ha webmail ainda. Responder algo simples mantem o host valido para o
-	# desafio ACME. Quando instalar Roundcube, troque por: reverse_proxy roundcube:80
 	respond "marujo.dev mail server" 200
+}
+
+webmail.marujo.dev {
+	encode zstd gzip
+	reverse_proxy roundcube:80
 }

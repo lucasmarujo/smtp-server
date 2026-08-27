@@ -5,11 +5,13 @@ IPv6 detectado: `2a02:4780:6e:cbb5::1` — **nao publicar AAAA** por enquanto (v
 
 | Nome (host)                       | Tipo | Valor / conteudo                                   | TTL  | Status |
 |-----------------------------------|------|---------------------------------------------------|------|--------|
-| `mail.marujo.dev`                 | A    | `76.13.167.76`                                     | 3600 | ja existe |
-| `marujo.dev`                      | MX   | `10 mail.marujo.dev`                               | 3600 | **criar** |
-| `marujo.dev`                      | TXT  | `v=spf1 mx -all`                                   | 3600 | **criar** |
-| `_dmarc.marujo.dev`               | TXT  | `v=DMARC1; p=none; rua=mailto:hi@marujo.dev`       | 3600 | **criar** |
-| `mail._domainkey.marujo.dev`      | TXT  | valor DKIM abaixo                                  | 3600 | **criar** |
+| `mail.marujo.dev`                 | A    | `76.13.167.76`                                     | 3600 | OK (existe) |
+| `webmail.marujo.dev`              | A    | `76.13.167.76`                                     | 3600 | OK (wildcard `*.marujo.dev`) |
+| `marujo.dev`                      | MX   | `10 mail.marujo.dev`                               | 3600 | OK (publicado) |
+| `marujo.dev`                      | TXT  | `v=spf1 mx -all`                                   | 3600 | OK (publicado) |
+| `_dmarc.marujo.dev`               | TXT  | `v=DMARC1; p=none; rua=mailto:hi@marujo.dev`       | 3600 | OK (publicado) |
+| `mail._domainkey.marujo.dev`      | TXT  | valor DKIM abaixo                                  | 3600 | OK (publicado) |
+| PTR `76.13.167.76`                | -    | `mail.marujo.dev` (no hPanel, nao no DNS)          | -    | OK (configurado) |
 
 ## DKIM (selector `mail`)
 

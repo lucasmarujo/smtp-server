@@ -24,14 +24,18 @@ Primeira caixa: **hi@marujo.dev**
    │     docker-mailserver 15.1.0                │
    │     ├─ Postfix   :25  (MX, servidor→servidor)
    │     ├─ Postfix   :587 (submission, auth+TLS)│
-   │     ├─ Dovecot   :993 (IMAPS)               │
+   │     ├─ Dovecot   :993 (IMAPS) :4190 (sieve) │
    │     ├─ Rspamd    (antispam + assinatura DKIM,│
    │     │             checagem SPF/DKIM/DMARC)  │
    │     ├─ Fail2ban  (brute force)              │
    │     └─ Redis     (estado do Rspamd)         │
+   │                    ▲ ssl:// (alias de rede) │
+   │   Container "roundcube" (/opt/mail)         │
+   │     Roundcube 1.7 + SQLite                  │
+   │     :80 ── via Caddy → webmail.marujo.dev   │
    │                                            │
    │   Volumes persistentes em                   │
-   │     /opt/mail/docker-data/dms/              │
+   │     /opt/mail/docker-data/{dms,roundcube}/  │
    └────────────────────────────────────────────┘
 ```
 
@@ -42,6 +46,15 @@ Primeira caixa: **hi@marujo.dev**
   `mynetworks`, sem compartilhar volumes.
 - ClamAV, Amavis e SpamAssassin desligados (Rspamd cobre antispam; a VPS tem
   RAM limitada). Reative via `.env` se quiser.
+- TLS: `SSL_TYPE=manual` lendo o certificado Let's Encrypt de `mail.marujo.dev`
+  que o Caddy do host (`/opt/proxy`) emite e renova, montado em `/caddy-certs/`
+  (ro). `config/ssl/` guarda um self-signed de emergencia.
+- Postfix so IPv4 (`config/postfix-main.cf`): a bridge Docker nao tem rota IPv6.
+- Webmail: container `roundcube` (mesma stack), SQLite local, exposto so via Caddy
+  em `https://webmail.marujo.dev`. Fala com o `mail` por `ssl://mail.marujo.dev`
+  (alias de rede Docker → cert LE valido, sem sair para a internet). O Fail2ban
+  ignora as redes internas do Docker (`config/fail2ban-jail.cf`) para o webmail
+  nao se auto-banir; o Roundcube tem `login_rate_limit` proprio.
 
 ### Mapa de diretorios
 
@@ -50,12 +63,15 @@ Primeira caixa: **hi@marujo.dev**
 | `docker-compose.yml` | definicao do servico (sem secrets) |
 | `.env` | variaveis e flags (perm. `600`, fora do git) |
 | `.env.example` | modelo versionado |
-| `config/` | material de apoio: snippet do Caddy, registros DNS |
+| `config/` | material de apoio: snippet do Caddy, DNS, override Fail2ban |
 | `config/ssl/` | certificado self-signed temporario (fallback) |
-| `docker-data/dms/config/` | contas, aliases, chaves DKIM, overrides Rspamd/Dovecot |
+| `config/roundcube/custom.inc.php` | overrides do webmail |
+| `docker-data/dms/config/` | contas, aliases, chaves DKIM, overrides Rspamd/Dovecot/Fail2ban |
 | `docker-data/dms/mail-data/` | mailboxes (Maildir) — **os e-mails** |
 | `docker-data/dms/mail-state/` | estado (Redis, Rspamd, Fail2ban, logs rotacionados) |
 | `docker-data/dms/mail-logs/` | logs do Postfix/Dovecot/Rspamd |
+| `docker-data/roundcube/db/` | SQLite do Roundcube (contatos, identidades, preferencias) |
+| `docker-data/roundcube/www/` | app do Roundcube (regeneravel, fora do backup) |
 | `secrets/` | senhas geradas das contas (perm. `700`, fora do git) |
 | `backups/` | tarballs de backup (fora do git) |
 | `scripts/` | manutencao (abaixo) |
@@ -69,9 +85,12 @@ Primeira caixa: **hi@marujo.dev**
 | 25  | Postfix smtpd     | recepcao servidor→servidor (MX). Sem AUTH, sem relay. | STARTTLS oportunista |
 | 587 | Postfix submission | envio autenticado pelos clientes | STARTTLS **obrigatorio** |
 | 993 | Dovecot imap-login | leitura das caixas | TLS implicito **obrigatorio** |
+| 443 | Caddy → Roundcube | `https://webmail.marujo.dev` (webmail) | TLS (Let's Encrypt, no Caddy) |
 
-Portas 110/143/465/995/4190 existem no container mas **nao** sao publicadas.
-Interface web do Rspamd (`:11334`) fica so na rede interna do container.
+Portas 110/143/465/995 existem no container `mail` mas **nao** sao publicadas.
+`4190` (ManageSieve, filtros) e `11334` (web UI do Rspamd) ficam so na rede
+interna do Docker — o Roundcube usa o 4190 por ali. O container `roundcube`
+so publica o `:80` **para o Caddy** (rede `proxy`), nunca direto na internet.
 
 ---
 
@@ -251,9 +270,15 @@ SMTP:
   autenticacao: normal (usuario + senha), obrigatoria
 ```
 
-Enquanto o certificado for self-signed (fase inicial), o cliente vai avisar sobre
-certificado nao confiavel. Depois de ativar o Let's Encrypt (secao 13) o aviso
-some.
+O certificado e Let's Encrypt (emitido e renovado pelo Caddy do host), valido
+para `mail.marujo.dev` — nenhum aviso de certificado nos clientes.
+
+### Webmail
+
+`https://webmail.marujo.dev` — login com `hi@marujo.dev` + a mesma senha.
+Nao precisa configurar servidor/porta: o Roundcube ja aponta para o Dovecot e o
+Postfix internos. Da para enviar, receber, gerenciar contatos e criar filtros
+(engrenagem → Filtros). Sessao expira em 30 min de inatividade.
 
 ---
 
@@ -271,33 +296,35 @@ _dmarc.marujo.dev.           TXT   "v=DMARC1; p=none; rua=mailto:hi@marujo.dev"
 mail._domainkey.marujo.dev.  TXT   "v=DKIM1; k=rsa; p=MIIBIjANBgkq...IDAQAB"   (valor completo em config/dns-records.md)
 ```
 
-`mail.marujo.dev A 76.13.167.76` ja existe.
+`mail.marujo.dev` e `webmail.marujo.dev` ja resolvem (existe um `*.marujo.dev`
+wildcard apontando para `76.13.167.76`) — nenhum registro novo foi necessario
+para o webmail.
 
 ### PTR (reverse DNS)
 
 Ajustar no painel da Hostinger (hPanel -> VPS -> rDNS):
 `76.13.167.76 -> mail.marujo.dev`. Nao e alteravel a partir da VPS.
 
-### TLS via Let's Encrypt (usa o Caddy ja existente)
+### TLS via Let's Encrypt (usa o Caddy ja existente) — JA CONFIGURADO
 
-1. Confirme que `mail.marujo.dev A` aponta para a VPS (ja OK).
-2. Adicione ao `/opt/proxy/Caddyfile` o bloco de
-   `config/caddy-mail.snippet.Caddyfile`.
-3. Recarregue o Caddy sem downtime:
-   ```bash
-   docker exec -w /etc/caddy caddy caddy reload
-   ```
-4. Aguarde o Caddy emitir o certificado:
-   ```bash
-   docker exec caddy ls /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mail.marujo.dev/
-   ```
-   (se o Caddy usar o ZeroSSL como fallback, o diretorio muda —
-   ajuste `SSL_CERT_PATH`/`SSL_KEY_PATH` no `.env` conforme o caminho real.)
-5. No `.env`: `SSL_TYPE=self-signed` -> `SSL_TYPE=manual`.
-6. `cd /opt/mail && docker compose up -d && ./scripts/healthcheck.sh`
+Estado atual: bloco `mail.marujo.dev` adicionado ao `/opt/proxy/Caddyfile`
+(seção "MAIL"), certificado LE emitido via `tls-alpn-01`, `.env` com
+`SSL_TYPE=manual`. Renovacao automatica pelo Caddy; o container detecta a troca
+do arquivo e recarrega Postfix/Dovecot sozinho.
 
-Renovacao: automatica pelo Caddy. O container detecta a troca do arquivo e
-recarrega Postfix/Dovecot sozinho.
+Se algum dia precisar refazer do zero:
+
+1. Bloco de `config/caddy-mail.snippet.Caddyfile` no `/opt/proxy/Caddyfile`.
+2. `docker restart caddy`  (mount de arquivo unico nao recarrega so com
+   `caddy reload` quando o arquivo e reescrito por editor — o restart e ~1s).
+3. Conferir emissao:
+   `docker exec caddy ls /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/mail.marujo.dev/`
+   (se o Caddy cair pro ZeroSSL, o diretorio muda — ajuste
+   `SSL_CERT_PATH`/`SSL_KEY_PATH` no `.env`.)
+4. `.env`: `SSL_TYPE=manual` e `cd /opt/mail && docker compose up -d`.
+
+O webmail (`webmail.marujo.dev`) tem bloco proprio no mesmo `/opt/proxy/Caddyfile`
+(`reverse_proxy roundcube:80`) e cert LE separado, tambem automatico.
 
 ---
 
@@ -315,6 +342,11 @@ recarrega Postfix/Dovecot sozinho.
 | Ver por que uma mensagem foi barrada pelo Rspamd | `docker exec mail rspamc stat`; `/var/log/mail/rspamd.log` |
 | IP em blocklist | consulte https://multirbl.valli.org ; peca delisting; melhore aquecimento/volume |
 | Rspamd web UI | `ssh -L 11334:127.0.0.1:11334 lucas@76.13.167.76` depois `docker exec mail ...` ou publique com auth |
+| Webmail nao abre (502/504) | `docker compose ps roundcube`; `docker compose logs roundcube`; Caddy consegue resolver `roundcube` na rede `proxy`? |
+| Webmail: "Falha na conexao com o servidor" no login | `docker exec roundcube openssl s_client -connect mail.marujo.dev:993` deve dar `Verify return code: 0`; conferir alias de rede no `docker-compose.yml` |
+| Webmail desloga sozinho / erro de sessao | `ROUNDCUBEMAIL_DES_KEY` mudou no `.env`? tem que ser fixo (24 chars) |
+| Login web falha mas IMAP direto funciona | ver `docker compose logs roundcube` e `/var/log/mail/mail.log` (linha `imap-login` com `rip=172.24.x`) |
+| Filtros (Sieve) nao salvam | `ENABLE_MANAGESIEVE=1` no `.env`? porta 4190 respondendo dentro do container `mail`? |
 
 Comandos de diagnostico:
 
@@ -333,7 +365,9 @@ docker exec mail supervisorctl status        # servicos internos
 cd /opt/mail
 # 1. backup antes
 ./scripts/backup.sh
-# 2. ajуste a tag em .env (DMS_IMAGE=mailserver/docker-mailserver:X.Y.Z)
+# 2. ajuste as tags em .env:
+#      DMS_IMAGE=mailserver/docker-mailserver:X.Y.Z
+#      ROUNDCUBE_IMAGE=roundcube/roundcubemail:X.Y.Z-apache
 # 3.
 docker compose pull
 docker compose up -d
@@ -344,8 +378,9 @@ python3 scripts/smtp-tests.py
 
 Ler o CHANGELOG do docker-mailserver
 (https://github.com/docker-mailserver/docker-mailserver/blob/master/CHANGELOG.md)
-antes de mudanca de major. Rollback: volte a tag anterior no `.env` +
-`docker compose up -d` (ou restaure o backup).
+antes de mudanca de major. O Roundcube atualiza o schema do banco sozinho no
+start (o entrypoint roda `installto.sh` + `initdb.sh --update`). Rollback: volte
+a tag anterior no `.env` + `docker compose up -d` (ou restaure o backup).
 
 O Caddy e o Redis do Rspamd atualizam junto com suas respectivas imagens
 (`caddy:2-alpine` fora deste projeto; Redis embutido no DMS).
@@ -367,8 +402,13 @@ O Caddy e o Redis do Rspamd atualizam junto com suas respectivas imagens
   caixa. Sem redundancia de MX.
 - **Manutencao continua.** Patches de seguranca, renovacao/rotacao de chaves,
   monitorar filas, relatorios DMARC, mudancas de politica dos grandes provedores.
-- **Seguranca.** Servico exposto na internet (25/587/993). Fail2ban e TLS
-  mitigam, mas exige acompanhar logs e atualizar a imagem.
+- **Seguranca.** Servicos expostos na internet (25/587/993 e o webmail em 443).
+  Fail2ban e TLS mitigam, mas exige acompanhar logs e atualizar as imagens. O
+  webmail e uma superficie extra (PHP): mantenha `ROUNDCUBE_IMAGE` atualizada,
+  o `enable_installer` esta desligado e ha `login_rate_limit`. Como o Fail2ban
+  ignora a rede do Docker, a protecao contra forca bruta no **webmail** vem so
+  do rate limit do Roundcube — se virar alvo, considere um jail dedicado nos
+  logs do container `roundcube` ou proteger `webmail.marujo.dev` no Caddy.
 - **Backup e o que esta em jogo.** Perder `docker-data/` = perder e-mails. Backup
   testado e off-site e obrigatorio.
 - **Legal / abuso.** Voce e responsavel pelo trafego do seu IP. Configure

@@ -31,8 +31,64 @@ services:
       timeout: 3s
       retries: 0
 
+    networks:
+      default:
+        # O Roundcube conecta em "mail.marujo.dev" e recebe o certificado
+        # Let's Encrypt valido (mesmo nome), sem sair para a internet.
+        aliases:
+          - mail.marujo.dev
+
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
+
+  roundcube:
+    image: ${ROUNDCUBE_IMAGE}
+    container_name: roundcube
+    hostname: webmail.marujo.dev
+    restart: unless-stopped
+    depends_on:
+      - mailserver
+
+    environment:
+      ROUNDCUBEMAIL_DEFAULT_HOST: "ssl://mail.marujo.dev"
+      ROUNDCUBEMAIL_DEFAULT_PORT: "993"
+      ROUNDCUBEMAIL_SMTP_SERVER: "tls://mail.marujo.dev"
+      ROUNDCUBEMAIL_SMTP_PORT: "587"
+      ROUNDCUBEMAIL_DB_TYPE: "sqlite"
+      ROUNDCUBEMAIL_PLUGINS: "archive,zipdownload,managesieve"
+      ROUNDCUBEMAIL_USERNAME_DOMAIN: "${MAIL_DOMAIN}"
+      ROUNDCUBEMAIL_DES_KEY: "${ROUNDCUBEMAIL_DES_KEY}"
+      ROUNDCUBEMAIL_UPLOAD_MAX_FILESIZE: "25M"
+      ROUNDCUBEMAIL_TEMP_DIR: "/tmp/roundcube-temp"
+      TZ: "${TZ}"
+
+    volumes:
+      - ./docker-data/roundcube/www/:/var/www/html/
+      - ./docker-data/roundcube/db/:/var/roundcube/db/
+      - ./config/roundcube/custom.inc.php:/var/roundcube/config/custom.inc.php:ro
+
+    networks:
+      default:
+      proxy:
+
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://localhost/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  default:
+    name: mail_default
+  proxy:
+    external: true

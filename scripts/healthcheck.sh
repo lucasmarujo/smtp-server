@@ -110,11 +110,42 @@ DMARC="$(dns_txt "_dmarc.${MAIL_DOMAIN}" TXT | grep -i 'v=DMARC1' || true)"
 DKIM_DNS="$(dns_txt "mail._domainkey.${MAIL_DOMAIN}" TXT | grep -i 'v=DKIM1' || true)"
 [ -n "${DKIM_DNS}" ] && pass "DKIM DNS publicado" || err "DKIM ausente em mail._domainkey.${MAIL_DOMAIN}"
 if [ -n "${PUB_IP}" ]; then
-  PTR="$(dig +short -x "${PUB_IP}" @1.1.1.1 2>/dev/null)"
-  echo "${PTR}" | grep -q "${MAIL_HOSTNAME}" && pass "PTR ${PUB_IP} -> ${PTR}" || warn "PTR = ${PTR:-vazio} (ideal: ${MAIL_HOSTNAME}.) - configurar no painel da VPS"
+  PTR=""
+  for res in 1.1.1.1 8.8.8.8 9.9.9.9; do
+    p="$(dig +short -x "${PUB_IP}" @"${res}" 2>/dev/null)"
+    PTR="${PTR}${p}"
+    echo "${p}" | grep -q "${MAIL_HOSTNAME}" && PTR_OK=1
+  done
+  if [ -n "${PTR_OK:-}" ]; then
+    pass "PTR ${PUB_IP} -> ${MAIL_HOSTNAME}"
+  else
+    warn "PTR ainda = ${PTR:-vazio} (alvo: ${MAIL_HOSTNAME}.) - se ja configurou no hPanel, aguarde a propagacao (ate algumas horas)"
+  fi
 fi
 
-echo "== 9. Armazenamento =="
+echo "== 9. Webmail (Roundcube) =="
+RC_STATE="$(docker inspect -f '{{.State.Status}}' roundcube 2>/dev/null || echo missing)"
+RC_HEALTH="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' roundcube 2>/dev/null || echo n/a)"
+if [ "${RC_STATE}" = "missing" ]; then
+  warn "container 'roundcube' nao existe (webmail nao instalado)"
+elif [ "${RC_STATE}" = "running" ] && { [ "${RC_HEALTH}" = "healthy" ] || [ "${RC_HEALTH}" = "starting" ] || [ "${RC_HEALTH}" = "n/a" ]; }; then
+  pass "container 'roundcube' running (health: ${RC_HEALTH})"
+  RC_LOCAL="$(docker exec roundcube sh -c 'curl -s -o /dev/null -w "%{http_code}" http://localhost/' 2>/dev/null || echo 000)"
+  [ "${RC_LOCAL}" = "200" ] && pass "Roundcube responde HTTP 200 (interno)" || warn "Roundcube HTTP interno = ${RC_LOCAL}"
+  WM_HOST="webmail.${MAIL_DOMAIN}"
+  WM_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${WM_HOST}/" 2>/dev/null || echo 000)"
+  [ "${WM_CODE}" = "200" ] && pass "https://${WM_HOST} -> 200" || err "https://${WM_HOST} -> ${WM_CODE}"
+  if echo | openssl s_client -connect "${WM_HOST}:443" -servername "${WM_HOST}" 2>/dev/null \
+       | openssl x509 -noout -checkend 864000 >/dev/null 2>&1; then
+    pass "certificado de ${WM_HOST} valido (>10d)"
+  else
+    warn "certificado de ${WM_HOST} perto de expirar ou invalido"
+  fi
+else
+  err "container 'roundcube' state=${RC_STATE} health=${RC_HEALTH}"
+fi
+
+echo "== 10. Armazenamento =="
 USE="$(df -P "${MAIL_DIR}" | awk 'NR==2{gsub("%","",$5); print $5}')"
 if [ "${USE}" -ge 90 ]; then err "disco em ${USE}% de uso"
 elif [ "${USE}" -ge 80 ]; then warn "disco em ${USE}% de uso"

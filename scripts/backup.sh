@@ -31,6 +31,7 @@ docker run --rm --entrypoint tar \
   -v "${MAIL_DIR}:/data:ro" \
   "${HELPER_IMAGE}" \
   czf - -C /data \
+  --ignore-failed-read \
   docker-compose.yml \
   .env \
   .env.example \
@@ -39,6 +40,7 @@ docker run --rm --entrypoint tar \
   scripts \
   docker-data/dms/config \
   docker-data/dms/mail-data \
+  docker-data/roundcube/db \
   secrets > "${ARCHIVE}"
 
 [ -s "${ARCHIVE}" ] || die "arquivo de backup vazio: ${ARCHIVE}"

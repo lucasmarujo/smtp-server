@@ -33,7 +33,7 @@ fi
 SAFETY="${MAIL_DIR}/backups/pre-restore-$(date +%Y%m%d-%H%M%S).tar.gz"
 echo "Salvando estado atual em ${SAFETY} ..."
 docker run --rm --entrypoint tar -v "${MAIL_DIR}:/data:ro" "${HELPER_IMAGE}" \
-  czf - --ignore-failed-read -C /data docker-data/dms/config docker-data/dms/mail-data secrets .env > "${SAFETY}" || true
+  czf - --ignore-failed-read -C /data docker-data/dms/config docker-data/dms/mail-data docker-data/roundcube/db secrets .env > "${SAFETY}" || true
 chmod 600 "${SAFETY}" 2>/dev/null || true
 
 echo "Extraindo backup..."
