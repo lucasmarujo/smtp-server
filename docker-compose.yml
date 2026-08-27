@@ -58,7 +58,7 @@ services:
       ROUNDCUBEMAIL_SMTP_SERVER: "tls://mail.marujo.dev"
       ROUNDCUBEMAIL_SMTP_PORT: "587"
       ROUNDCUBEMAIL_DB_TYPE: "sqlite"
-      ROUNDCUBEMAIL_PLUGINS: "archive,zipdownload,managesieve"
+      ROUNDCUBEMAIL_PLUGINS: "archive,zipdownload,managesieve,gravatar"
       ROUNDCUBEMAIL_USERNAME_DOMAIN: "${MAIL_DOMAIN}"
       ROUNDCUBEMAIL_DES_KEY: "${ROUNDCUBEMAIL_DES_KEY}"
       ROUNDCUBEMAIL_UPLOAD_MAX_FILESIZE: "25M"
@@ -69,6 +69,7 @@ services:
       - ./docker-data/roundcube/www/:/var/www/html/
       - ./docker-data/roundcube/db/:/var/roundcube/db/
       - ./config/roundcube/custom.inc.php:/var/roundcube/config/custom.inc.php:ro
+      - ./config/roundcube/plugins/gravatar/:/var/www/html/plugins/gravatar/:ro
 
     networks:
       default:

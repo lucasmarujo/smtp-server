@@ -141,6 +141,18 @@ elif [ "${RC_STATE}" = "running" ] && { [ "${RC_HEALTH}" = "healthy" ] || [ "${R
   else
     warn "certificado de ${WM_HOST} perto de expirar ou invalido"
   fi
+  if docker exec roundcube test -f /var/www/html/plugins/gravatar/gravatar.php 2>/dev/null \
+       && docker exec roundcube grep -q "'gravatar'" /var/www/html/config/config.docker.inc.php 2>/dev/null; then
+    pass "plugin 'gravatar' instalado e ativo (avatares)"
+  else
+    warn "plugin 'gravatar' ausente ou fora de ROUNDCUBEMAIL_PLUGINS"
+  fi
+  GRAV_CODE="$(docker exec roundcube curl -s -o /dev/null -w '%{http_code}' --max-time 10 'https://www.gravatar.com/avatar/0?d=404' 2>/dev/null || echo 000)"
+  if [ "${GRAV_CODE}" = "404" ] || [ "${GRAV_CODE}" = "200" ]; then
+    pass "container alcanca gravatar.com (avatares carregam)"
+  else
+    warn "container nao alcanca gravatar.com (HTTP ${GRAV_CODE}) - avatares nao vao carregar"
+  fi
 else
   err "container 'roundcube' state=${RC_STATE} health=${RC_HEALTH}"
 fi

@@ -40,3 +40,11 @@ $config['product_name']       = 'marujo.dev webmail';
 $config['support_url']        = '';
 $config['enable_spellcheck']  = false;
 $config['mime_param_folding'] = 1;
+
+// Avatares (plugin gravatar): foto de remetentes e destinatarios via Gravatar.
+// Ligado por padrao para todos; cada usuario pode desativar em
+// Configuracoes -> Catalogo de enderecos. Requisicao servidor->gravatar.com
+// (envia o md5 do e-mail do contato) apenas na primeira exibicao de cada
+// endereco; sem correspondencia, nenhuma foto e exibida (d=404).
+$config['gravatar_enabled'] = true;
+$config['gravatar_https']   = true;

@@ -66,6 +66,7 @@ Primeira caixa: **hi@marujo.dev**
 | `config/` | material de apoio: snippet do Caddy, DNS, override Fail2ban |
 | `config/ssl/` | certificado self-signed temporario (fallback) |
 | `config/roundcube/custom.inc.php` | overrides do webmail |
+| `config/roundcube/plugins/` | plugins do Roundcube versionados, montados read-only (ex.: `gravatar`) |
 | `docker-data/dms/config/` | contas, aliases, chaves DKIM, overrides Rspamd/Dovecot/Fail2ban |
 | `docker-data/dms/mail-data/` | mailboxes (Maildir) — **os e-mails** |
 | `docker-data/dms/mail-state/` | estado (Redis, Rspamd, Fail2ban, logs rotacionados) |
@@ -280,6 +281,14 @@ Nao precisa configurar servidor/porta: o Roundcube ja aponta para o Dovecot e o
 Postfix internos. Da para enviar, receber, gerenciar contatos e criar filtros
 (engrenagem → Filtros). Sessao expira em 30 min de inatividade.
 
+**Avatares.** O plugin `gravatar` (versionado em `config/roundcube/plugins/gravatar/`,
+montado read-only) mostra a foto de remetentes e destinatarios buscando no
+[Gravatar](https://gravatar.com) pelo e-mail. Vem ligado para todos; cada usuario
+pode desativar em Configuracoes → Catalogo de enderecos. Para ter foto propria,
+crie uma conta no Gravatar com o mesmo endereco — nao ha upload de foto no
+servidor. Enderecos sem Gravatar ficam sem foto (o container consulta
+`gravatar.com` uma vez por endereco, enviando o md5 do e-mail).
+
 ---
 
 ## 13. Registros DNS e TLS
@@ -347,6 +356,7 @@ O webmail (`webmail.marujo.dev`) tem bloco proprio no mesmo `/opt/proxy/Caddyfil
 | Webmail desloga sozinho / erro de sessao | `ROUNDCUBEMAIL_DES_KEY` mudou no `.env`? tem que ser fixo (24 chars) |
 | Login web falha mas IMAP direto funciona | ver `docker compose logs roundcube` e `/var/log/mail/mail.log` (linha `imap-login` com `rip=172.24.x`) |
 | Filtros (Sieve) nao salvam | `ENABLE_MANAGESIEVE=1` no `.env`? porta 4190 respondendo dentro do container `mail`? |
+| Avatares nao aparecem | `./scripts/healthcheck.sh` secao 9; container precisa alcancar `gravatar.com`; so aparece foto de quem tem conta no Gravatar; cada usuario pode ter desativado em Configuracoes -> Catalogo de enderecos |
 
 Comandos de diagnostico:
 
@@ -409,6 +419,9 @@ O Caddy e o Redis do Rspamd atualizam junto com suas respectivas imagens
   ignora a rede do Docker, a protecao contra forca bruta no **webmail** vem so
   do rate limit do Roundcube — se virar alvo, considere um jail dedicado nos
   logs do container `roundcube` ou proteger `webmail.marujo.dev` no Caddy.
+  O plugin `gravatar` faz o container abrir conexoes de saida para `gravatar.com`
+  (md5 do e-mail dos contatos); para desligar, tire `gravatar` de
+  `ROUNDCUBEMAIL_PLUGINS` no `docker-compose.yml`.
 - **Backup e o que esta em jogo.** Perder `docker-data/` = perder e-mails. Backup
   testado e off-site e obrigatorio.
 - **Legal / abuso.** Voce e responsavel pelo trafego do seu IP. Configure
