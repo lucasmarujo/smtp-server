@@ -1,0 +1,38 @@
+services:
+  mailserver:
+    image: ${DMS_IMAGE}
+    container_name: mail
+    hostname: ${MAIL_HOSTNAME}
+    restart: unless-stopped
+    stop_grace_period: 1m
+
+    env_file: .env
+
+    ports:
+      - "25:25"     # SMTP  - MX / servidor-a-servidor (sem auth, sem relay)
+      - "587:587"   # Submission - envio autenticado (STARTTLS obrigatorio)
+      - "993:993"   # IMAPS - acesso a caixa postal (TLS implicito)
+
+    volumes:
+      - ./docker-data/dms/mail-data/:/var/mail/
+      - ./docker-data/dms/mail-state/:/var/mail-state/
+      - ./docker-data/dms/mail-logs/:/var/log/mail/
+      - ./docker-data/dms/config/:/tmp/docker-mailserver/
+      - /etc/localtime:/etc/localtime:ro
+      # Certificados TLS emitidos pelo Caddy ja existente no host (somente leitura).
+      # Usado apenas quando SSL_TYPE=manual (ver README secao TLS).
+      - /opt/proxy/caddy_data/caddy/certificates/:/caddy-certs/:ro
+
+    cap_add:
+      - NET_ADMIN            # necessario para o Fail2ban interno
+
+    healthcheck:
+      test: "ss --listening --tcp | grep -P 'LISTEN.+:smtp' || exit 1"
+      timeout: 3s
+      retries: 0
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
