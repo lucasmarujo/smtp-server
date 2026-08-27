@@ -1,0 +1,14 @@
+# Secrets / ambiente
+.env
+
+# Dados persistentes (mailbox, estado, logs, chaves DKIM, contas)
+docker-data/
+
+# Backups
+backups/*.tar.gz
+backups/*.tar.gz.sha256
+
+# Credenciais geradas
+secrets/
+*.private
+credentials-*.txt
