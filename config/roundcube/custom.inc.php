@@ -35,6 +35,15 @@ $config['referer_check']     = true;
 $config['x_frame_options']   = 'sameorigin';
 $config['login_rate_limit']  = 3;
 
+// Grava tentativas de login (sucesso/falha) em logs/userlogins.log. Usado pelo
+// jail dedicado do Fail2ban no host (ver README - Fail2ban para o webmail),
+// ja que o Fail2ban interno do container 'mail' ignora a rede Docker.
+// A imagem oficial nao aceita ROUNDCUBEMAIL_LOG_DRIVER como env var (so
+// aceita 'stdout' hardcoded na geracao inicial do config.inc.php) - por isso
+// o driver e forcado aqui, no ultimo include da cadeia de config.
+$config['log_driver'] = 'file';
+$config['log_logins'] = true;
+
 // Identidade / UX.
 $config['product_name']       = 'marujo.dev webmail';
 $config['support_url']        = '';
