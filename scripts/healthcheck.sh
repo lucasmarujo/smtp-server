@@ -122,6 +122,10 @@ if [ -n "${PUB_IP}" ]; then
     warn "PTR ainda = ${PTR:-vazio} (alvo: ${MAIL_HOSTNAME}.) - se ja configurou no hPanel, aguarde a propagacao (ate algumas horas)"
   fi
 fi
+MTASTS="$(dns_txt "_mta-sts.${MAIL_DOMAIN}" TXT | grep -i 'v=STSv1' || true)"
+[ -n "${MTASTS}" ] && pass "MTA-STS: ${MTASTS}" || warn "MTA-STS ausente em _mta-sts.${MAIL_DOMAIN} (ver config/dns-records.md)"
+TLSRPT="$(dns_txt "_smtp._tls.${MAIL_DOMAIN}" TXT | grep -i 'v=TLSRPTv1' || true)"
+[ -n "${TLSRPT}" ] && pass "TLS-RPT: ${TLSRPT}" || warn "TLS-RPT ausente em _smtp._tls.${MAIL_DOMAIN} (ver config/dns-records.md)"
 
 echo "== 9. Webmail (Roundcube) =="
 RC_STATE="$(docker inspect -f '{{.State.Status}}' roundcube 2>/dev/null || echo missing)"

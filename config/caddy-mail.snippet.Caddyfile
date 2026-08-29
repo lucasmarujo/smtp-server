@@ -5,13 +5,16 @@
 #                          Let's Encrypt que o Postfix/Dovecot usam
 #                          (o container mail le em /caddy-certs/, ro).
 #   webmail.marujo.dev  -> Roundcube (container 'roundcube', rede 'proxy').
+#   mta-sts.marujo.dev  -> serve /.well-known/mta-sts.txt (politica MTA-STS,
+#                          ver config/dns-records.md e config/mta-sts/).
 #
 # O Caddyfile e um bind-mount de arquivo unico; editores que reescrevem o
 # arquivo trocam o inode e o `caddy reload` NAO pega a mudanca. Use:
 #   docker restart caddy          (~1s de indisponibilidade no proxy)
 #
-# STATUS: aplicado em 2026-08-27. .env em SSL_TYPE=manual, certs LE ativos
-# para mail.marujo.dev e webmail.marujo.dev.
+# STATUS: aplicado em 2026-08-27 (mail/webmail). Headers de seguranca e bloco
+# mta-sts adicionados em 2026-08-28 (hardening). .env em SSL_TYPE=manual,
+# certs LE ativos para mail.marujo.dev e webmail.marujo.dev.
 # ---------------------------------------------------------------------------
 
 mail.marujo.dev {
@@ -20,5 +23,22 @@ mail.marujo.dev {
 
 webmail.marujo.dev {
 	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
+		-X-Powered-By
+	}
 	reverse_proxy roundcube:80
+}
+
+# Politica MTA-STS estatica. mode: testing (so gera relatorio TLS-RPT, nao
+# forca nada) - ver config/mta-sts/.well-known/mta-sts.txt e o roadmap de
+# enrijecimento em config/dns-records.md.
+mta-sts.marujo.dev {
+	root * /srv/mta-sts
+	file_server
 }

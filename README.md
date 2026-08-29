@@ -196,7 +196,7 @@ TXT, aguarde a propagacao, mantenha o antigo por alguns dias e depois remova.
 
 ```bash
 ./scripts/backup.sh
-# -> backups/mail-backup-AAAAMMDD-HHMMSS.tar.gz (+ .sha256)
+# -> backups/mail-backup-AAAAMMDD-HHMMSS.tar.gz.gpg (+ .sha256)
 ```
 
 Inclui: `docker-compose.yml`, `.env`, `config/` (inclui o cert self-signed de
@@ -205,6 +205,11 @@ overrides), `docker-data/dms/mail-data` (todas as mailboxes) e `secrets/`.
 Nao inclui `docker-data/dms/mail-state/` (estado de runtime regenerado pelo
 container: spool do Postfix, base do Fail2ban, cache do Rspamd).
 
+O tarball e **criptografado com gpg** (AES256 simetrico) usando a passphrase em
+`secrets/backup-passphrase.txt` (gerada uma vez, 700/600 como o resto de
+`secrets/`) — o script apaga o `.tar.gz` em texto claro depois de cifrar. **Guarde
+uma copia da passphrase FORA da VPS**: sem ela os backups sao irrecuperaveis.
+
 O script **pausa o container** durante o `tar` para um snapshot consistente e
 sobe de novo ao final. **Nao** apaga backups antigos automaticamente:
 
@@ -212,23 +217,39 @@ sobe de novo ao final. **Nao** apaga backups antigos automaticamente:
 ./scripts/backup.sh --prune 30   # remove backups com mais de 30 dias (manual)
 ```
 
-Copie os tarballs para fora da VPS (contem senhas e chave privada DKIM).
-Sugestao de agendamento (crontab do usuario `lucas`):
+Copie os `.tar.gz.gpg` para fora da VPS. Agendamento (crontab do usuario
+`lucas`, ja aplicado — ver `crontab -l`):
 
 ```
-15 3 * * *  /opt/mail/scripts/backup.sh >> /opt/mail/backups/backup.log 2>&1
+15 3 * * *   cd /opt/mail && ./scripts/backup.sh >> backups/backup.log 2>&1
+30 3 * * 0   cd /opt/mail && ./scripts/backup.sh --prune 30 >> backups/backup.log 2>&1
+0 * * * *    cd /opt/mail && ./scripts/healthcheck.sh --quiet >> backups/healthcheck.log 2>&1
 ```
+
+Os dois logs giram semanalmente via `/etc/logrotate.d/mail-scripts`. Instalar
+uma vez:
+
+```bash
+sudo cp config/logrotate/mail-scripts.conf /etc/logrotate.d/mail-scripts
+```
+
+Nao ha alerta automatico em caso de
+falha (`[FAIL]` no healthcheck ou erro no backup) — hoje e preciso checar
+`backups/healthcheck.log`/`backups/backup.log` de vez em quando. Se quiser
+alerta ativo no futuro, um webhook simples (ex.: healthchecks.io, ntfy) e o
+proximo passo natural.
 
 ---
 
 ## 10. Restaurar backup
 
 ```bash
-./scripts/restore.sh backups/mail-backup-AAAAMMDD-HHMMSS.tar.gz
+./scripts/restore.sh backups/mail-backup-AAAAMMDD-HHMMSS.tar.gz.gpg
 ```
 
-Verifica o SHA256, salva um snapshot de seguranca em `backups/pre-restore-*`,
-extrai por cima da instalacao e sobe o container. Rode o healthcheck depois.
+Verifica o SHA256, descriptografa (pede `secrets/backup-passphrase.txt`), salva
+um snapshot de seguranca em `backups/pre-restore-*`, extrai por cima da
+instalacao e sobe o container. Rode o healthcheck depois.
 
 ---
 
@@ -280,6 +301,33 @@ para `mail.marujo.dev` — nenhum aviso de certificado nos clientes.
 Nao precisa configurar servidor/porta: o Roundcube ja aponta para o Dovecot e o
 Postfix internos. Da para enviar, receber, gerenciar contatos e criar filtros
 (engrenagem → Filtros). Sessao expira em 30 min de inatividade.
+
+**2FA (TOTP).** Plugin `twofactor_gauthenticator` (versionado em
+`config/roundcube/plugins/twofactor_gauthenticator/`, montado read-only, mesmo
+padrao do `gravatar`) — opcional por usuario, nao trava o login de
+`hi@marujo.dev` antes de configurar. Para ativar: Configuracoes → 2-Factor
+Authentication → "Fill all fields" (gera o segredo e os codigos de
+recuperacao), escanear o QR code em qualquer app TOTP (Google Authenticator,
+Aegis, Authy, etc.) e salvar. Guarde os codigos de recuperacao em lugar
+seguro. Configuracao do plugin em
+`config/roundcube/plugins/twofactor_gauthenticator/config.inc.php`
+(gitignored, so no host).
+
+**Fail2ban do webmail.** O Fail2ban interno do container `mail` ignora a rede
+Docker, entao logins falhos no Roundcube nunca batem nele. Ha um jail dedicado
+rodando no HOST que le `docker-data/roundcube/logs/userlogins.log` e bane no
+firewall do host (mesmos limites do jail interno: 4 tentativas / 10 min → ban
+de 30 min). Instalar uma vez:
+
+```bash
+sudo cp config/fail2ban/roundcube.filter.conf /etc/fail2ban/filter.d/roundcube.conf
+sudo cp config/fail2ban/roundcube.jail.local /etc/fail2ban/jail.d/roundcube.local
+sudo fail2ban-client reload
+fail2ban-client status roundcube   # confirma o jail ativo
+```
+
+Atencao: o ban e por IP nas portas 80/443 do host — bloqueia esse IP em todos
+os sites atras do mesmo Caddy (portfolio, pulso, orkai), nao so no webmail.
 
 **Avatares.** O plugin `gravatar` (versionado em `config/roundcube/plugins/gravatar/`,
 montado read-only) mostra a foto de remetentes e destinatarios buscando no
@@ -333,7 +381,32 @@ Se algum dia precisar refazer do zero:
 4. `.env`: `SSL_TYPE=manual` e `cd /opt/mail && docker compose up -d`.
 
 O webmail (`webmail.marujo.dev`) tem bloco proprio no mesmo `/opt/proxy/Caddyfile`
-(`reverse_proxy roundcube:80`) e cert LE separado, tambem automatico.
+(`reverse_proxy roundcube:80`) e cert LE separado, tambem automatico. O bloco
+inclui headers de seguranca (HSTS, `X-Content-Type-Options`, `X-Frame-Options`,
+`Referrer-Policy`, `Permissions-Policy`) — sem CSP: o Roundcube usa script/estilo
+inline e uma CSP mal calibrada quebraria a UI.
+
+### MTA-STS / TLS-RPT
+
+Protege contra downgrade de TLS na entrega SMTP entre servidores. Politica
+estatica servida em `https://mta-sts.marujo.dev/.well-known/mta-sts.txt`
+(conteudo em `config/mta-sts/`), `mode: testing` por enquanto (so gera
+relatorio, nao bloqueia entrega). Depois de publicar os DNS records (ver
+`config/dns-records.md`) e alguns dias sem erro nos relatorios TLS-RPT, trocar
+para `mode: enforce`.
+
+Requer, alem do bloco `mta-sts.marujo.dev` em `/opt/proxy/Caddyfile` (ver
+`config/caddy-mail.snippet.Caddyfile`), montar `config/mta-sts/` no container
+`caddy` — adicionar em `/opt/proxy/docker-compose.yml`, servico `caddy`,
+`volumes`:
+
+```yaml
+      - /opt/mail/config/mta-sts:/srv/mta-sts:ro
+```
+
+Depois `docker compose up -d` no `/opt/proxy` (recria o container com o novo
+mount) e `docker restart caddy` (mesma ressalva do bind-mount de arquivo unico
+do Caddyfile nao se aplica aqui, mas o restart do bloco `mail` ja cobre).
 
 ---
 
@@ -415,18 +488,23 @@ O Caddy e o Redis do Rspamd atualizam junto com suas respectivas imagens
 - **Seguranca.** Servicos expostos na internet (25/587/993 e o webmail em 443).
   Fail2ban e TLS mitigam, mas exige acompanhar logs e atualizar as imagens. O
   webmail e uma superficie extra (PHP): mantenha `ROUNDCUBE_IMAGE` atualizada,
-  o `enable_installer` esta desligado e ha `login_rate_limit`. Como o Fail2ban
-  ignora a rede do Docker, a protecao contra forca bruta no **webmail** vem so
-  do rate limit do Roundcube — se virar alvo, considere um jail dedicado nos
-  logs do container `roundcube` ou proteger `webmail.marujo.dev` no Caddy.
-  O plugin `gravatar` faz o container abrir conexoes de saida para `gravatar.com`
-  (md5 do e-mail dos contatos); para desligar, tire `gravatar` de
-  `ROUNDCUBEMAIL_PLUGINS` no `docker-compose.yml`.
+  o `enable_installer` esta desligado, ha `login_rate_limit`, **2FA opcional**
+  (secao 12) e um **jail dedicado do Fail2ban no host** cobrindo o login do
+  webmail (o interno ignora a rede Docker — ver secao 12). O plugin `gravatar`
+  faz o container abrir conexoes de saida para `gravatar.com` (md5 do e-mail dos
+  contatos); para desligar, tire `gravatar` de `ROUNDCUBEMAIL_PLUGINS` no
+  `docker-compose.yml`.
 - **Backup e o que esta em jogo.** Perder `docker-data/` = perder e-mails. Backup
-  testado e off-site e obrigatorio.
+  diario agendado, criptografado (gpg) e testado — copiar para fora da VPS
+  continua manual (secao 9).
 - **Legal / abuso.** Voce e responsavel pelo trafego do seu IP. Configure
   `abuse@`/`postmaster@` e responda a reclamacoes.
+- **DNSSEC.** Ainda nao habilitado no registrador. Sem ele, um ataque de DNS
+  spoofing poderia forjar respostas SPF/DKIM/DMARC/MTA-STS. Fora do escopo deste
+  repo (acao no painel do dominio), mas vale habilitar quando possivel.
 
-Mitigacao pratica: manter DMARC em `p=none` ate os relatorios ficarem limpos,
-subir para `quarantine` e depois `reject`; healthcheck no cron; backup diario
-off-site; considerar um MX secundario / servico de backup MX no futuro.
+Mitigacao pratica: manter DMARC em `p=none` ate os relatorios ficarem limpos
+(checkpoint em 2026-09-10, ver `config/dns-records.md`), subir para
+`quarantine` e depois `reject`; MTA-STS em `mode: testing` ate confirmar os
+relatorios TLS-RPT; healthcheck e backup ja agendados via cron; considerar um
+MX secundario / servico de backup MX no futuro.

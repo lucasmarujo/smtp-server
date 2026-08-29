@@ -1,0 +1,4 @@
+version: STSv1
+mode: testing
+mx: mail.marujo.dev
+max_age: 86400
