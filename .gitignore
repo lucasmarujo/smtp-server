@@ -7,6 +7,9 @@ docker-data/
 # Backups
 backups/*.tar.gz
 backups/*.tar.gz.sha256
+backups/*.tar.gz.gpg
+backups/*.tar.gz.gpg.sha256
+backups/*.log
 
 # Credenciais geradas
 secrets/

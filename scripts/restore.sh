@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Restaura um backup gerado por backup.sh.
-#   ./restore.sh backups/mail-backup-AAAAMMDD-HHMMSS.tar.gz
+#   ./restore.sh backups/mail-backup-AAAAMMDD-HHMMSS.tar.gz.gpg
 #
 # Sobrescreve config/, scripts/, secrets/, .env e
 # docker-data/dms/{config,mail-data}. Pede confirmacao antes de aplicar.
@@ -8,13 +8,25 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 ARCHIVE="${1:-}"
-[ -n "${ARCHIVE}" ] || die "uso: $0 caminho/do/backup.tar.gz"
+[ -n "${ARCHIVE}" ] || die "uso: $0 caminho/do/backup.tar.gz(.gpg)"
 [ -f "${ARCHIVE}" ] || die "arquivo nao encontrado: ${ARCHIVE}"
 ARCHIVE="$(cd "$(dirname "${ARCHIVE}")" && pwd)/$(basename "${ARCHIVE}")"
 
 if [ -f "${ARCHIVE}.sha256" ]; then
   echo "Verificando integridade..."
   ( cd "$(dirname "${ARCHIVE}")" && sha256sum -c "$(basename "${ARCHIVE}").sha256" ) || die "checksum invalido"
+fi
+
+if [[ "${ARCHIVE}" == *.gpg ]]; then
+  PASSPHRASE_FILE="${MAIL_DIR}/secrets/backup-passphrase.txt"
+  [ -s "${PASSPHRASE_FILE}" ] || die "passphrase de backup ausente: ${PASSPHRASE_FILE}"
+  DECRYPTED="$(mktemp "${MAIL_DIR}/backups/.restore-XXXXXX.tar.gz")"
+  chmod 600 "${DECRYPTED}"
+  trap 'rm -f "${DECRYPTED}"' EXIT
+  echo "Descriptografando..."
+  gpg --batch --yes --pinentry-mode loopback --passphrase-file "${PASSPHRASE_FILE}" \
+    -d "${ARCHIVE}" > "${DECRYPTED}" || die "falha ao descriptografar: ${ARCHIVE}"
+  ARCHIVE="${DECRYPTED}"
 fi
 
 HELPER_IMAGE="$(grep -E '^DMS_IMAGE=' "${MAIL_DIR}/.env" | cut -d= -f2)"
