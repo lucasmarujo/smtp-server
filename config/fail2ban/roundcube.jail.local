@@ -1,0 +1,27 @@
+# Jail do Fail2ban (HOST) para forca bruta no login do webmail (Roundcube).
+# Copiar para /etc/fail2ban/jail.d/roundcube.local (requer roundcube.filter.conf
+# em /etc/fail2ban/filter.d/roundcube.conf - ver arquivo irmao neste diretorio).
+#
+# Necessario porque o Fail2ban INTERNO do container 'mail' ignora toda a rede
+# Docker (docker-data/dms/config/fail2ban-jail.cf) - logins do Roundcube nunca
+# batem la. Este jail roda no host, le o log do proprio Roundcube e bane no
+# firewall do host (banaction=nftables, definido em
+# /etc/fail2ban/jail.d/defaults-debian.conf).
+#
+# ATENCAO: o ban e por IP nas portas 80/443 do host - isso bloqueia o IP em
+# TODOS os sites atras do mesmo Caddy (portfolio, pulso, orkai), nao so no
+# webmail. E o comportamento correto para um IP fazendo forca bruta, mas fica
+# registrado aqui para nao ser surpresa.
+#
+# maxretry/findtime/bantime iguais ao jail interno do DMS (fail2ban-jail.cf)
+# para manter a mesma politica em ambos os pontos de entrada.
+
+[roundcube]
+enabled  = true
+filter   = roundcube
+backend  = auto
+logpath  = /opt/mail/docker-data/roundcube/logs/userlogins.log
+port     = http,https
+maxretry = 4
+findtime = 10m
+bantime  = 30m
